@@ -1,0 +1,152 @@
+/* WooCommerce Recurring Billing - Frontend Styles */
+
+.woocommerce-account-url-manager {
+    max-width: 800px;
+}
+
+.woocommerce-account-url-manager h3 {
+    color: #333;
+    margin-bottom: 15px;
+    font-size: 24px;
+}
+
+.current-urls {
+    background: #f8f9fa;
+    border-left: 4px solid #0073aa;
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 4px;
+}
+
+.current-urls h4 {
+    margin-top: 0;
+    color: #0073aa;
+    font-size: 16px;
+}
+
+.current-urls .urls-display {
+    font-family: 'Courier New', monospace;
+    background: #fff;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    word-break: break-all;
+    line-height: 1.6;
+    font-size: 14px;
+}
+
+#url-submission-form {
+    background: #fff;
+    padding: 25px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    margin: 20px 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+#url-submission-form .form-row {
+    margin-bottom: 20px;
+}
+
+#url-submission-form label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #333;
+    font-size: 14px;
+}
+
+#url-submission-form input[type="url"] {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: border-color 0.3s ease;
+}
+
+#url-submission-form input[type="url"]:focus {
+    outline: none;
+    border-color: #0073aa;
+    box-shadow: 0 0 0 2px rgba(0, 115, 170, 0.2);
+}
+
+#url-submission-form button[type="submit"] {
+    background: #0073aa;
+    color: white;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+
+#url-submission-form button[type="submit"]:hover {
+    background: #005a87;
+}
+
+#url-submission-form button[type="submit"]:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+#url-submission-result {
+    margin: 20px 0;
+}
+
+#url-submission-result .woocommerce-message {
+    background: #d4edda;
+    color: #155724;
+    padding: 15px;
+    border: 1px solid #c3e6cb;
+    border-radius: 4px;
+    margin: 10px 0;
+}
+
+#url-submission-result .woocommerce-error {
+    background: #f8d7da;
+    color: #721c24;
+    padding: 15px;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    margin: 10px 0;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #ccc;
+    border-top: 2px solid #0073aa;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 8px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .woocommerce-account-url-manager {
+        padding: 0 10px;
+    }
+    
+    #url-submission-form {
+        padding: 15px;
+    }
+    
+    .current-urls {
+        padding: 15px;
+    }
+}
+
+/* Account menu styling for URL Manager */
+.woocommerce-account .woocommerce-MyAccount-navigation ul li.woocommerce-MyAccount-navigation-link--url-manager a::before {
+    content: "\f103";
+    font-family: "dashicons";
+}
