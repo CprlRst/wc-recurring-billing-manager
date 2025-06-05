@@ -1,125 +1,284 @@
-/* WooCommerce Recurring Billing - Frontend Styles */
+/* WooCommerce Recurring Billing - Enhanced Frontend Styles */
 
+/* Main Container */
 .woocommerce-account-url-manager {
-    max-width: 800px;
+    max-width: 900px;
+    margin: 0 auto;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen-Sans, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
 }
 
+/* Headings */
 .woocommerce-account-url-manager h3 {
-    color: #333;
-    margin-bottom: 15px;
-    font-size: 24px;
+    color: #2c3e50;
+    margin-bottom: 20px;
+    font-size: 28px;
+    font-weight: 600;
+    border-bottom: 3px solid #0073aa;
+    padding-bottom: 10px;
 }
 
+/* Current URL Display Section */
+.current-url {
+    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+    border-left: 5px solid #28a745;
+    padding: 20px;
+    margin: 25px 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(40, 167, 69, 0.1);
+    transition: all 0.3s ease;
+}
+
+.current-url:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.15);
+}
+
+.current-url h4 {
+    color: #155724;
+    margin-top: 0;
+    font-size: 18px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+}
+
+.current-url h4::before {
+    content: "✅";
+    margin-right: 8px;
+    font-size: 20px;
+}
+
+.current-url .urls-display {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    background: #fff;
+    padding: 15px;
+    border: 1px solid #c3e6cb;
+    border-radius: 6px;
+    word-break: break-all;
+    line-height: 1.6;
+    font-size: 14px;
+    margin: 10px 0;
+    position: relative;
+    overflow-x: auto;
+}
+
+/* Current URLs Legacy Support */
 .current-urls {
-    background: #f8f9fa;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
     border-left: 4px solid #0073aa;
     padding: 20px;
-    margin: 20px 0;
-    border-radius: 4px;
+    margin: 25px 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 115, 170, 0.1);
 }
 
 .current-urls h4 {
     margin-top: 0;
     color: #0073aa;
-    font-size: 16px;
+    font-size: 18px;
+    font-weight: 600;
 }
 
 .current-urls .urls-display {
-    font-family: 'Courier New', monospace;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     background: #fff;
     padding: 15px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
     word-break: break-all;
     line-height: 1.6;
     font-size: 14px;
+    margin: 10px 0;
+    max-height: 200px;
+    overflow-y: auto;
 }
 
+/* Form Styling */
 #url-submission-form {
     background: #fff;
-    padding: 25px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    margin: 20px 0;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    padding: 30px;
+    border: 1px solid #dee2e6;
+    border-radius: 12px;
+    margin: 25px 0;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    position: relative;
+    transition: all 0.3s ease;
 }
 
-#url-submission-form .form-row {
-    margin-bottom: 20px;
+#url-submission-form:hover {
+    box-shadow: 0 6px 25px rgba(0, 0, 0, 0.12);
+}
+
+#url-submission-form::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #0073aa, #005a87);
+    border-radius: 12px 12px 0 0;
+}
+
+.form-row {
+    margin-bottom: 25px;
+    position: relative;
+}
+
+.form-row.focused {
+    transform: scale(1.01);
+    transition: transform 0.2s ease;
 }
 
 #url-submission-form label {
     display: block;
     font-weight: 600;
-    margin-bottom: 8px;
-    color: #333;
-    font-size: 14px;
+    margin-bottom: 10px;
+    color: #2c3e50;
+    font-size: 15px;
+    position: relative;
 }
 
+#url-submission-form label::after {
+    content: "*";
+    color: #e74c3c;
+    margin-left: 4px;
+    font-weight: bold;
+}
+
+/* Enhanced URL Input */
 #url-submission-form input[type="url"] {
     width: 100%;
-    padding: 12px;
-    border: 2px solid #ddd;
-    border-radius: 4px;
-    font-size: 14px;
-    transition: border-color 0.3s ease;
+    padding: 15px 20px;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    font-size: 16px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    transition: all 0.3s ease;
+    background: #fafafa;
+    position: relative;
 }
 
 #url-submission-form input[type="url"]:focus {
     outline: none;
     border-color: #0073aa;
-    box-shadow: 0 0 0 2px rgba(0, 115, 170, 0.2);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(0, 115, 170, 0.1);
+    transform: translateY(-1px);
 }
 
+#url-submission-form input[type="url"]:valid {
+    border-color: #28a745;
+    padding-right: 45px;
+}
+
+#url-submission-form input[type="url"]:valid::after {
+    content: "✓";
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #28a745;
+    font-weight: bold;
+    font-size: 18px;
+}
+
+#url-submission-form input[type="url"]:invalid:not(:placeholder-shown) {
+    border-color: #dc3545;
+    background-color: #fff5f5;
+}
+
+/* Submit Button */
 #url-submission-form button[type="submit"] {
-    background: #0073aa;
+    background: linear-gradient(135deg, #0073aa 0%, #005a87 100%);
     color: white;
-    padding: 12px 24px;
+    padding: 15px 30px;
     border: none;
-    border-radius: 4px;
-    font-size: 14px;
+    border-radius: 8px;
+    font-size: 16px;
     font-weight: 600;
     cursor: pointer;
-    transition: background-color 0.3s ease;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+    min-width: 140px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
 }
 
-#url-submission-form button[type="submit"]:hover {
-    background: #005a87;
+#url-submission-form button[type="submit"]:hover:not(:disabled) {
+    background: linear-gradient(135deg, #005a87 0%, #004465 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 115, 170, 0.3);
+}
+
+#url-submission-form button[type="submit"]:active {
+    transform: translateY(0);
 }
 
 #url-submission-form button[type="submit"]:disabled {
-    background: #ccc;
+    background: #6c757d;
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+    opacity: 0.6;
 }
 
+/* Button Loading State */
+#url-submission-form button[type="submit"]:disabled .loading-spinner {
+    margin-right: 8px;
+}
+
+/* Messages */
 #url-submission-result {
-    margin: 20px 0;
+    margin: 25px 0;
 }
 
 #url-submission-result .woocommerce-message {
-    background: #d4edda;
+    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
     color: #155724;
-    padding: 15px;
+    padding: 18px 20px;
     border: 1px solid #c3e6cb;
-    border-radius: 4px;
-    margin: 10px 0;
+    border-left: 4px solid #28a745;
+    border-radius: 8px;
+    margin: 15px 0;
+    position: relative;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.1);
+}
+
+#url-submission-result .woocommerce-message::before {
+    content: "✅";
+    margin-right: 10px;
+    font-size: 16px;
 }
 
 #url-submission-result .woocommerce-error {
-    background: #f8d7da;
+    background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
     color: #721c24;
-    padding: 15px;
+    padding: 18px 20px;
     border: 1px solid #f5c6cb;
-    border-radius: 4px;
-    margin: 10px 0;
+    border-left: 4px solid #dc3545;
+    border-radius: 8px;
+    margin: 15px 0;
+    position: relative;
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.1);
 }
 
+#url-submission-result .woocommerce-error::before {
+    content: "❌";
+    margin-right: 10px;
+    font-size: 16px;
+}
+
+/* Loading Spinner */
 .loading-spinner {
     display: inline-block;
     width: 16px;
     height: 16px;
-    border: 2px solid #ccc;
-    border-top: 2px solid #0073aa;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid #fff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin-right: 8px;
@@ -130,8 +289,221 @@
     100% { transform: rotate(360deg); }
 }
 
-/* Responsive design */
+/* Validation Messages */
+#url-validation-message {
+    margin-top: 8px;
+    font-size: 14px;
+    min-height: 20px;
+    transition: all 0.3s ease;
+}
+
+#url-validation-message span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 500;
+}
+
+/* Character Counter */
+.url-char-counter {
+    color: #6c757d;
+    font-size: 12px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    display: block;
+    margin-top: 5px;
+    transition: color 0.3s ease;
+}
+
+/* Copy Button */
+.copy-urls-btn {
+    margin-top: 15px;
+    padding: 8px 15px;
+    background: linear-gradient(135deg, #0073aa 0%, #005a87 100%);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.copy-urls-btn:hover {
+    background: linear-gradient(135deg, #005a87 0%, #004465 100%);
+    transform: translateY(-1px);
+}
+
+/* URL Suggestions */
+.url-suggestions {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 15px;
+    margin-top: 15px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.url-suggestions strong {
+    color: #495057;
+    font-size: 14px;
+    display: block;
+    margin-bottom: 10px;
+}
+
+.url-suggestion {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 8px 12px;
+    margin: 3px 0;
+    cursor: pointer;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 12px;
+    color: #495057;
+    transition: all 0.2s ease;
+}
+
+.url-suggestion:hover {
+    background: #e9ecef;
+    color: #0073aa;
+}
+
+/* Info Messages */
+.woocommerce-message--info {
+    background: linear-gradient(135deg, #e1f5fe 0%, #b3e5fc 100%);
+    border-left: 4px solid #01579b;
+    padding: 20px;
+    margin: 25px 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(1, 87, 155, 0.1);
+}
+
+.woocommerce-message--info p {
+    margin: 0 0 10px 0;
+    color: #01579b;
+}
+
+.woocommerce-message--info strong {
+    color: #0d47a1;
+}
+
+.woocommerce-message--info .button {
+    background: #01579b;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    text-decoration: none;
+    display: inline-block;
+    margin-top: 10px;
+    transition: all 0.3s ease;
+}
+
+.woocommerce-message--info .button:hover {
+    background: #0d47a1;
+    transform: translateY(-1px);
+}
+
+/* Warning Messages */
+.warning-message {
+    background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+    border-left: 4px solid #ffc107;
+    padding: 20px;
+    margin: 25px 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(255, 193, 7, 0.1);
+}
+
+.warning-message p {
+    margin: 0 0 10px 0;
+    color: #856404;
+}
+
+.warning-message strong {
+    color: #533f03;
+}
+
+/* Progress Bar */
+.submission-progress {
+    width: 100%;
+    height: 4px;
+    background: #f0f0f0;
+    border-radius: 2px;
+    margin: 15px 0;
+    overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #0073aa, #005a87);
+    width: 0%;
+    transition: width 0.3s ease;
+    border-radius: 2px;
+}
+
+/* Subscription Details in Product Display */
+.subscription-details {
+    display: block;
+    color: #666;
+    font-weight: normal;
+    font-size: 0.9em;
+    margin-top: 5px;
+    font-style: italic;
+}
+
+/* Account menu styling for URL Manager */
+.woocommerce-account .woocommerce-MyAccount-navigation ul li.woocommerce-MyAccount-navigation-link--url-manager a::before {
+    content: "\f103";
+    font-family: "dashicons";
+    color: #0073aa;
+}
+
+/* Responsive Design */
 @media (max-width: 768px) {
+    .woocommerce-account-url-manager {
+        padding: 0 15px;
+    }
+    
+    #url-submission-form {
+        padding: 20px;
+        margin: 15px 0;
+    }
+    
+    .current-url,
+    .current-urls {
+        padding: 15px;
+        margin: 15px 0;
+    }
+    
+    #url-submission-form input[type="url"] {
+        padding: 12px 15px;
+        font-size: 14px;
+    }
+    
+    #url-submission-form button[type="submit"] {
+        width: 100%;
+        padding: 12px;
+        font-size: 14px;
+    }
+    
+    .woocommerce-account-url-manager h3 {
+        font-size: 24px;
+    }
+    
+    .current-url .urls-display,
+    .current-urls .urls-display {
+        font-size: 12px;
+        padding: 12px;
+    }
+}
+
+@media (max-width: 480px) {
     .woocommerce-account-url-manager {
         padding: 0 10px;
     }
@@ -140,13 +512,130 @@
         padding: 15px;
     }
     
-    .current-urls {
-        padding: 15px;
+    .woocommerce-account-url-manager h3 {
+        font-size: 20px;
+    }
+    
+    #url-submission-form input[type="url"] {
+        padding: 10px 12px;
+        font-size: 13px;
     }
 }
 
-/* Account menu styling for URL Manager */
-.woocommerce-account .woocommerce-MyAccount-navigation ul li.woocommerce-MyAccount-navigation-link--url-manager a::before {
-    content: "\f103";
-    font-family: "dashicons";
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .woocommerce-account-url-manager {
+        color: #e9ecef;
+    }
+    
+    #url-submission-form {
+        background: #2c3e50;
+        border-color: #34495e;
+    }
+    
+    #url-submission-form input[type="url"] {
+        background: #34495e;
+        border-color: #495057;
+        color: #e9ecef;
+    }
+    
+    #url-submission-form input[type="url"]:focus {
+        background: #495057;
+        border-color: #0073aa;
+    }
+    
+    .current-url {
+        background: linear-gradient(135deg, #1e3a2e 0%, #2d5a3d 100%);
+        color: #a8d8b0;
+    }
+    
+    .current-urls {
+        background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+    }
+    
+    .current-url .urls-display,
+    .current-urls .urls-display {
+        background: #495057;
+        border-color: #6c757d;
+        color: #e9ecef;
+    }
+}
+
+/* Animation Classes */
+.fade-in {
+    animation: fadeIn 0.3s ease-in;
+}
+
+.slide-up {
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Focus styles for accessibility */
+button:focus,
+input:focus,
+select:focus {
+    outline: 2px solid #0073aa;
+    outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+    #url-submission-form {
+        border-width: 2px;
+    }
+    
+    #url-submission-form input[type="url"] {
+        border-width: 2px;
+    }
+    
+    .current-url,
+    .current-urls {
+        border-left-width: 6px;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+    
+    .loading-spinner {
+        animation: none;
+        border: 2px solid #ccc;
+        border-top: 2px solid #0073aa;
+    }
+}
+
+/* Print styles */
+@media print {
+    #url-submission-form button,
+    .copy-urls-btn {
+        display: none;
+    }
+    
+    .current-url,
+    .current-urls {
+        border: 1px solid #000;
+        background: #fff !important;
+        color: #000 !important;
+    }
 }
