@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WooCommerce Recurring Billing Manager
  * Description: Manages recurring subscriptions with URL whitelist management and invoicing
- * Version: 1.0.85
+ * Version: 1.0.90
  * Author: Your Name
  * Requires at least: 5.0
  * Tested up to: 6.3
@@ -19,6 +19,82 @@ if (!defined('ABSPATH')) {
 if (!in_array('woocommerce/woocommerce.php', apply_filters('active_plugins', get_option('active_plugins')))) {
     return;
 }
+
+/**
+ * Initialize the custom product class when WooCommerce is loaded
+ */
+function wc_recurring_billing_init_product_class() {
+    if (!class_exists('WC_Product')) {
+        return;
+    }
+    
+    /**
+     * Custom WooCommerce Product Class for Recurring Subscriptions
+     */
+    class WC_Product_Recurring_Subscription extends WC_Product {
+        
+        public function get_type() {
+            return 'recurring_subscription';
+        }
+        
+        public function get_subscription_type() {
+            return $this->get_meta('_subscription_type', true) ?: 'monthly';
+        }
+        
+        public function get_subscription_duration() {
+            return $this->get_meta('_subscription_duration', true) ?: '';
+        }
+        
+        public function is_subscription() {
+            return $this->get_meta('_is_subscription', true) === 'yes';
+        }
+        
+        public function get_price_html($price = '') {
+            $price = parent::get_price_html($price);
+            
+            if ($this->is_subscription() && $price) {
+                $subscription_type = $this->get_subscription_type();
+                $duration = $this->get_subscription_duration();
+                
+                $interval_text = $subscription_type === 'monthly' ? ' / month' : ' / year';
+                
+                if ($duration) {
+                    $duration_text = ' for ' . $duration . ' months';
+                    $price .= '<small class="subscription-details">' . $interval_text . $duration_text . '</small>';
+                } else {
+                    $price .= '<small class="subscription-details">' . $interval_text . '</small>';
+                }
+            }
+            
+            return $price;
+        }
+        
+        public function is_purchasable() {
+            $purchasable = true;
+            
+            if ($this->get_price() === '' || $this->get_price() <= 0) {
+                $purchasable = false;
+            }
+            
+            if (!$this->is_subscription()) {
+                $purchasable = false;
+            }
+            
+            return apply_filters('woocommerce_is_purchasable', $purchasable, $this);
+        }
+        
+        public function add_to_cart_text() {
+            return $this->is_purchasable() ? __('Subscribe Now', 'woocommerce') : __('Read more', 'woocommerce');
+        }
+        
+        public function single_add_to_cart_text() {
+            return __('Subscribe Now', 'woocommerce');
+        }
+    }
+}
+
+// Initialize the product class when WooCommerce is loaded
+add_action('woocommerce_loaded', 'wc_recurring_billing_init_product_class');
 
 class WC_Recurring_Billing_Manager {
     
@@ -43,6 +119,7 @@ class WC_Recurring_Billing_Manager {
         add_action('wp_ajax_repair_database', array($this, 'ajax_repair_database'));
         add_action('wp_ajax_manage_subscription', array($this, 'ajax_manage_subscription'));
         add_action('wp_ajax_create_invoice', array($this, 'ajax_create_invoice'));
+        add_action('wp_ajax_delete_subscription', array($this, 'ajax_delete_subscription'));
         add_action('wp_ajax_refresh_whitelist', array($this, 'ajax_refresh_whitelist'));
         add_action('wp_ajax_remove_user_url', array($this, 'ajax_remove_user_url'));
         
@@ -71,6 +148,12 @@ class WC_Recurring_Billing_Manager {
             // Add manual trigger for testing
             add_action('wp_ajax_test_subscription_creation', array($this, 'ajax_test_subscription_creation'));
         }
+        
+        // Payment processing
+        $this->init_payment_processing();
+        add_action('init', array($this, 'init_payment_handlers'));
+        add_action('init', array($this, 'add_payment_rewrite_rules'));
+        add_filter('query_vars', array($this, 'handle_payment_queries'));
         
         // Cron hooks for recurring billing and URL cleanup
         add_action('wp', array($this, 'schedule_recurring_billing'));
@@ -378,10 +461,12 @@ class WC_Recurring_Billing_Manager {
     public function admin_page() {
         global $wpdb;
         
+        // Get subscriptions with associated URLs
         $subscriptions = $wpdb->get_results(
-            "SELECT s.*, u.display_name, u.user_email 
+            "SELECT s.*, u.display_name, u.user_email, uu.url as current_url
              FROM $this->table_name s 
              LEFT JOIN {$wpdb->users} u ON s.user_id = u.ID 
+             LEFT JOIN $this->user_urls_table uu ON s.id = uu.subscription_id AND uu.status = 'active'
              ORDER BY s.created_at DESC"
         );
         
@@ -430,23 +515,33 @@ class WC_Recurring_Billing_Manager {
             <table class="wp-list-table widefat fixed striped">
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>User</th>
-                        <th>Type</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                        <th>Next Billing</th>
-                        <th>Expires</th>
-                        <th>Actions</th>
+                        <th style="width: 50px;">ID</th>
+                        <th style="width: 150px;">User</th>
+                        <th style="width: 200px;">Current URL</th>
+                        <th style="width: 80px;">Type</th>
+                        <th style="width: 80px;">Amount</th>
+                        <th style="width: 80px;">Status</th>
+                        <th style="width: 120px;">Next Billing</th>
+                        <th style="width: 90px;">Expires</th>
+                        <th style="width: 220px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($subscriptions as $subscription): ?>
-                    <tr>
+                    <tr id="subscription-row-<?php echo $subscription->id; ?>">
                         <td><?php echo $subscription->id; ?></td>
                         <td>
-                            <?php echo $subscription->display_name; ?><br>
-                            <small><?php echo $subscription->user_email; ?></small>
+                            <?php echo esc_html($subscription->display_name); ?><br>
+                            <small><?php echo esc_html($subscription->user_email); ?></small>
+                        </td>
+                        <td style="word-break: break-all; font-family: monospace; font-size: 12px;">
+                            <?php if ($subscription->current_url): ?>
+                                <a href="<?php echo esc_url($subscription->current_url); ?>" target="_blank" title="Visit URL">
+                                    <?php echo esc_html($subscription->current_url); ?>
+                                </a>
+                            <?php else: ?>
+                                <span style="color: #666; font-style: italic;">No URL submitted</span>
+                            <?php endif; ?>
                         </td>
                         <td><?php echo ucfirst($subscription->subscription_type); ?></td>
                         <td>$<?php echo number_format($subscription->amount, 2); ?></td>
@@ -468,11 +563,21 @@ class WC_Recurring_Billing_Manager {
                         <td>
                             <button class="button manage-subscription" 
                                     data-id="<?php echo $subscription->id; ?>" 
-                                    data-action="<?php echo $subscription->status === 'active' ? 'pause' : 'activate'; ?>">
+                                    data-action="<?php echo $subscription->status === 'active' ? 'pause' : 'activate'; ?>"
+                                    title="<?php echo $subscription->status === 'active' ? 'Pause subscription' : 'Activate subscription'; ?>">
                                 <?php echo $subscription->status === 'active' ? 'Pause' : 'Activate'; ?>
                             </button>
-                            <button class="button create-invoice" data-id="<?php echo $subscription->id; ?>">
-                                Create Invoice
+                            <button class="button create-invoice" 
+                                    data-id="<?php echo $subscription->id; ?>"
+                                    title="Create new invoice">
+                                Invoice
+                            </button>
+                            <button class="button button-link-delete delete-subscription" 
+                                    data-id="<?php echo $subscription->id; ?>" 
+                                    data-user="<?php echo esc_attr($subscription->display_name); ?>"
+                                    title="Permanently delete subscription and URL"
+                                    style="color: #d63638; text-decoration: none;">
+                                Delete
                             </button>
                         </td>
                     </tr>
@@ -543,6 +648,12 @@ class WC_Recurring_Billing_Manager {
         .status-active { color: #46b450; font-weight: bold; }
         .status-paused { color: #ffb900; font-weight: bold; }
         .status-cancelled { color: #dc3232; font-weight: bold; }
+        .subscription-details {
+            display: block;
+            color: #666;
+            font-weight: normal;
+            font-size: 0.9em;
+        }
         </style>
         <?php
     }
@@ -1246,10 +1357,142 @@ class WC_Recurring_Billing_Manager {
         );
         
         if ($result) {
+            // Send invoice email
+            $invoice_id = $wpdb->insert_id;
+            $this->send_invoice_email($invoice_id);
             wp_send_json_success('Invoice created successfully.');
         } else {
             wp_send_json_error('Failed to create invoice.');
         }
+    }
+    
+    public function ajax_delete_subscription() {
+        check_ajax_referer('wc_recurring_billing_admin_nonce', 'nonce');
+        
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Permission denied.');
+        }
+        
+        global $wpdb;
+        $subscription_id = intval($_POST['subscription_id']);
+        
+        if (!$subscription_id) {
+            wp_send_json_error('Invalid subscription ID.');
+        }
+        
+        // Get subscription details for logging
+        $subscription = $wpdb->get_row($wpdb->prepare(
+            "SELECT s.*, u.display_name, u.user_email 
+             FROM $this->table_name s 
+             LEFT JOIN {$wpdb->users} u ON s.user_id = u.ID 
+             WHERE s.id = %d",
+            $subscription_id
+        ));
+        
+        if (!$subscription) {
+            wp_send_json_error('Subscription not found.');
+        }
+        
+        try {
+            // Start transaction-like operations
+            
+            // 1. Get URLs associated with this subscription for whitelist cleanup
+            $urls_to_remove = $wpdb->get_results($wpdb->prepare(
+                "SELECT url FROM $this->user_urls_table WHERE subscription_id = %d AND status = 'active'",
+                $subscription_id
+            ));
+            
+            // 2. Delete user URLs
+            $deleted_urls = $wpdb->delete(
+                $this->user_urls_table,
+                array('subscription_id' => $subscription_id),
+                array('%d')
+            );
+            
+            // 3. Delete invoices
+            $invoices_table = $wpdb->prefix . 'recurring_invoices';
+            $deleted_invoices = $wpdb->delete(
+                $invoices_table,
+                array('subscription_id' => $subscription_id),
+                array('%d')
+            );
+            
+            // 4. Delete the subscription
+            $deleted_subscription = $wpdb->delete(
+                $this->table_name,
+                array('id' => $subscription_id),
+                array('%d')
+            );
+            
+            if ($deleted_subscription === false) {
+                wp_send_json_error('Failed to delete subscription from database.');
+            }
+            
+            // 5. Update Bricks whitelist to remove the URLs
+            if (!empty($urls_to_remove)) {
+                $this->remove_urls_from_bricks_whitelist($urls_to_remove);
+            }
+            
+            // Log the deletion for audit purposes
+            error_log("WC Recurring Billing: Subscription #{$subscription_id} deleted by admin. User: {$subscription->display_name} ({$subscription->user_email}). URLs removed: " . count($urls_to_remove) . ". Invoices removed: {$deleted_invoices}.");
+            
+            wp_send_json_success(array(
+                'message' => 'Subscription and all associated data deleted successfully.',
+                'details' => array(
+                    'subscription_id' => $subscription_id,
+                    'urls_removed' => count($urls_to_remove),
+                    'invoices_removed' => $deleted_invoices
+                )
+            ));
+            
+        } catch (Exception $e) {
+            error_log("WC Recurring Billing: Error deleting subscription #{$subscription_id}: " . $e->getMessage());
+            wp_send_json_error('Error deleting subscription: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Remove specific URLs from Bricks whitelist
+     */
+    private function remove_urls_from_bricks_whitelist($urls_to_remove) {
+        // Get current Bricks settings
+        $bricks_settings = get_option('bricks_global_settings', '');
+        $settings = maybe_unserialize($bricks_settings);
+        
+        if (!is_array($settings)) {
+            return; // No settings to update
+        }
+        
+        // Get existing URLs from Bricks
+        $existing_urls = isset($settings['myTemplatesWhitelist']) ? $settings['myTemplatesWhitelist'] : '';
+        $existing_urls_array = array_filter(array_map('trim', explode("\n", $existing_urls)));
+        
+        // Remove the specified URLs
+        $urls_to_remove_array = array();
+        foreach ($urls_to_remove as $url_obj) {
+            $urls_to_remove_array[] = trim($url_obj->url);
+        }
+        
+        $filtered_urls = array_filter($existing_urls_array, function($url) use ($urls_to_remove_array) {
+            return !in_array(trim($url), $urls_to_remove_array);
+        });
+        
+        // Update the whitelist
+        $settings['myTemplatesWhitelist'] = implode("\n", $filtered_urls);
+        
+        // Save to database
+        global $wpdb;
+        $serialized_settings = serialize($settings);
+        
+        $wpdb->update(
+            $wpdb->options,
+            array('option_value' => $serialized_settings),
+            array('option_name' => 'bricks_global_settings'),
+            array('%s'),
+            array('%s')
+        );
+        
+        wp_cache_delete('bricks_global_settings', 'options');
     }
     
     public function ajax_refresh_whitelist() {
@@ -1311,48 +1554,24 @@ class WC_Recurring_Billing_Manager {
         
         foreach ($due_subscriptions as $subscription) {
             // Create invoice
-            $invoice_number = 'INV-' . date('Y') . '-' . str_pad($subscription->id, 6, '0', STR_PAD_LEFT) . '-' . time();
+            $invoice_id = $this->create_invoice_with_payment($subscription->id, true);
             
-            $invoices_table = $wpdb->prefix . 'recurring_invoices';
-            $wpdb->insert(
-                $invoices_table,
-                array(
-                    'subscription_id' => $subscription->id,
-                    'user_id' => $subscription->user_id,
-                    'invoice_number' => $invoice_number,
-                    'amount' => $subscription->amount,
-                    'status' => 'pending'
-                ),
-                array('%d', '%d', '%s', '%f', '%s')
-            );
-            
-            // Update next billing date
-            $next_billing = $subscription->subscription_type === 'monthly' 
-                ? date('Y-m-d H:i:s', strtotime($subscription->next_billing_date . ' +1 month'))
-                : date('Y-m-d H:i:s', strtotime($subscription->next_billing_date . ' +1 year'));
-            
-            $wpdb->update(
-                $this->table_name,
-                array(
-                    'next_billing_date' => $next_billing,
-                    'last_billing_date' => current_time('mysql')
-                ),
-                array('id' => $subscription->id),
-                array('%s', '%s'),
-                array('%d')
-            );
-            
-            // Send email notification to user
-            $user = get_user_by('ID', $subscription->user_id);
-            if ($user) {
-                $subject = 'New Invoice - ' . $invoice_number;
-                $message = "Hello {$user->display_name},\n\n";
-                $message .= "A new invoice has been generated for your subscription.\n";
-                $message .= "Invoice Number: {$invoice_number}\n";
-                $message .= "Amount: $" . number_format($subscription->amount, 2) . "\n\n";
-                $message .= "Please log in to your account to view and pay the invoice.\n";
+            if ($invoice_id) {
+                // Update next billing date
+                $next_billing = $subscription->subscription_type === 'monthly' 
+                    ? date('Y-m-d H:i:s', strtotime($subscription->next_billing_date . ' +1 month'))
+                    : date('Y-m-d H:i:s', strtotime($subscription->next_billing_date . ' +1 year'));
                 
-                wp_mail($user->user_email, $subject, $message);
+                $wpdb->update(
+                    $this->table_name,
+                    array(
+                        'next_billing_date' => $next_billing,
+                        'last_billing_date' => current_time('mysql')
+                    ),
+                    array('id' => $subscription->id),
+                    array('%s', '%s'),
+                    array('%d')
+                );
             }
         }
     }
@@ -1445,48 +1664,29 @@ class WC_Recurring_Billing_Manager {
         return $types;
     }
     
-    public function add_subscription_product_tab($tabs) {
-        // Safety checks
-        if (!is_array($tabs) || !is_admin() || !class_exists('WooCommerce')) {
-            return $tabs;
-        }
-        
-        // Only add if it doesn't already exist
-        if (!isset($tabs['subscription'])) {
-            $tabs['subscription'] = array(
-                'label' => 'Subscription',
-                'target' => 'subscription_product_data',
-                'class' => array('show_if_recurring_subscription'),
-            );
-        }
-        
-        return $tabs;
-    }
-    
     public function add_subscription_fields_to_general() {
         global $post;
         
-        // Safety checks
         if (!$post || !is_object($post) || $post->post_type !== 'product') {
             return;
         }
         
-        // Get current values with more robust retrieval
         $is_subscription = get_post_meta($post->ID, '_is_subscription', true);
         $subscription_type = get_post_meta($post->ID, '_subscription_type', true);
         $subscription_duration = get_post_meta($post->ID, '_subscription_duration', true);
         
-        // Set defaults if empty
         if (empty($subscription_type)) {
             $subscription_type = 'monthly';
         }
         
-        // Debug output
-        error_log("WC Recurring Billing: Loading product #" . $post->ID . " - is_subscription: '" . $is_subscription . "', type: '" . $subscription_type . "', duration: '" . $subscription_duration . "'");
+        // Add nonce field for security
+        wp_nonce_field('wc_recurring_billing_save', '_wc_recurring_billing_nonce');
+        
+        // Add hidden field to detect our form submission
+        echo '<input type="hidden" name="_is_subscription_exists" value="1">';
         
         echo '<div class="options_group subscription_options" style="border-top: 1px solid #eee; padding-top: 15px; margin-top: 15px; background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #dee2e6;">';
         
-        // Subscription enable checkbox
         ?>
         <p class="form-field">
             <label for="_is_subscription">
@@ -1496,7 +1696,7 @@ class WC_Recurring_Billing_Manager {
             <span class="description">Check this box to enable recurring billing for this product</span>
         </p>
         
-        <div class="subscription_fields" id="subscription_fields" style="background: #f9f9f9; padding: 15px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px;">
+        <div class="subscription_fields" id="subscription_fields" style="background: #f9f9f9; padding: 15px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; <?php echo ($is_subscription !== 'yes') ? 'display: none;' : ''; ?>">
             <h4 style="margin: 0 0 15px 0; color: #0073aa; border-bottom: 1px solid #ddd; padding-bottom: 8px;">Subscription Settings</h4>
             
             <p class="form-field">
@@ -1525,158 +1725,57 @@ class WC_Recurring_Billing_Manager {
                 • Duration: (empty) = Lifetime subscription
             </div>
             
-            <!-- Debug info for troubleshooting -->
             <div style="background: #fff; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; font-family: monospace; font-size: 12px;">
-                <strong>Debug Values (Live):</strong><br>
-                <span class="debug-values-content">
-                    is_subscription: '<?php echo esc_html($is_subscription); ?>'<br>
-                    subscription_type: '<?php echo esc_html($subscription_type); ?>'<br>
-                    subscription_duration: '<?php echo esc_html($subscription_duration); ?>'
-                </span>
-                
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #ddd;">
-                    <button type="button" id="test-save-values" style="background: #007cba; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">
-                        Test Current Values
-                    </button>
-                    <span id="test-result" style="margin-left: 10px; font-weight: bold;"></span>
-                </div>
+                <strong>Preview:</strong><br>
+                <span id="subscription-preview">Configure settings above to see preview</span>
             </div>
         </div>
         
         <?php
-        echo '</div>'; // options_group
+        echo '</div>';
         
         ?>
         <script>
         jQuery(document).ready(function($) {
-            console.log('=== WC Recurring Billing Debug ===');
-            console.log('Script loaded successfully');
             
-            // Get the initial PHP values
-            var phpIsSubscription = '<?php echo esc_js($is_subscription); ?>';
-            var phpSubscriptionType = '<?php echo esc_js($subscription_type); ?>';
-            var phpSubscriptionDuration = '<?php echo esc_js($subscription_duration); ?>';
-            
-            console.log('PHP values from server:', {
-                is_subscription: phpIsSubscription,
-                subscription_type: phpSubscriptionType,
-                subscription_duration: phpSubscriptionDuration
-            });
-            
-            // Wait for DOM to be fully ready
-            setTimeout(function() {
-                console.log('=== Element Check (after delay) ===');
-                console.log('Checkbox found:', $('#_is_subscription').length);
-                console.log('Fields div found:', $('#subscription_fields').length);
-                console.log('Options group found:', $('.subscription_options').length);
-                
-                if ($('#_is_subscription').length > 0) {
-                    // Set checkbox state based on PHP value
-                    var shouldBeChecked = (phpIsSubscription === 'yes');
-                    console.log('Should checkbox be checked?', shouldBeChecked);
-                    
-                    $('#_is_subscription').prop('checked', shouldBeChecked);
-                    console.log('Checkbox state after setting:', $('#_is_subscription').is(':checked'));
-                    
-                    // Now show/hide fields based on correct state
-                    if (shouldBeChecked) {
-                        $('#subscription_fields').show();
-                        console.log('Showing subscription fields (checkbox should be checked)');
-                    } else {
-                        $('#subscription_fields').hide();
-                        console.log('Hiding subscription fields (checkbox should be unchecked)');
-                    }
-                } else {
-                    console.log('ERROR: Checkbox not found!');
-                }
-                
-                // Set other field values
-                if ($('#_subscription_type').length > 0) {
-                    $('#_subscription_type').val(phpSubscriptionType);
-                    console.log('Set subscription type to:', phpSubscriptionType);
-                }
-                
-                if ($('#_subscription_duration').length > 0) {
-                    $('#_subscription_duration').val(phpSubscriptionDuration);
-                    console.log('Set duration to:', phpSubscriptionDuration);
-                }
-                
-                // Update debug display
-                updateDebugValues();
-                
-            }, 100); // Short delay to ensure DOM is ready
-            
-            // Update debug values in real-time
-            function updateDebugValues() {
+            function updatePreview() {
                 var isChecked = $('#_is_subscription').is(':checked');
-                var subscriptionType = $('#_subscription_type').val();
-                var subscriptionDuration = $('#_subscription_duration').val();
+                var price = $('#_regular_price').val() || '0.00';
+                var type = $('#_subscription_type').val();
+                var duration = $('#_subscription_duration').val();
                 
-                var debugText = "is_subscription: '" + (isChecked ? 'yes' : 'no') + "'<br>";
-                debugText += "subscription_type: '" + subscriptionType + "'<br>";
-                debugText += "subscription_duration: '" + subscriptionDuration + "'";
-                
-                $('.debug-values-content').html(debugText);
-                console.log('Debug values updated:', { isChecked, subscriptionType, subscriptionDuration });
+                if (isChecked) {
+                    var preview = '$' + parseFloat(price).toFixed(2) + ' per ' + type.replace('ly', '');
+                    if (duration && duration > 0) {
+                        preview += ' for ' + duration + ' months';
+                    } else {
+                        preview += ' (lifetime)';
+                    }
+                    $('#subscription-preview').html(preview);
+                } else {
+                    $('#subscription-preview').html('Subscription not enabled');
+                }
             }
             
             function toggleSubscriptionFields() {
                 var isChecked = $('#_is_subscription').is(':checked');
-                console.log('toggleSubscriptionFields called, checkbox state:', isChecked);
                 
                 if (isChecked) {
                     $('#subscription_fields').slideDown(200);
-                    console.log('Sliding down subscription fields');
                 } else {
                     $('#subscription_fields').slideUp(200);
-                    console.log('Sliding up subscription fields');
                 }
                 
-                updateDebugValues();
+                updatePreview();
             }
             
-            // Test button functionality
-            $('#test-save-values').click(function() {
-                var isChecked = $('#_is_subscription').is(':checked');
-                var subscriptionType = $('#_subscription_type').val();
-                var subscriptionDuration = $('#_subscription_duration').val();
-                
-                var testData = {
-                    is_subscription: isChecked ? 'yes' : 'no',
-                    subscription_type: subscriptionType,
-                    subscription_duration: subscriptionDuration
-                };
-                
-                $('#test-result').html('Testing...').css('color', 'orange');
-                
-                console.log('=== TEST BUTTON CLICKED ===');
-                console.log('Test data that would be saved:', testData);
-                
-                // Show what would be sent in the form
-                var form = $('form#post')[0];
-                if (form) {
-                    var formData = new FormData(form);
-                    console.log('Form data inspection:');
-                    console.log('_is_subscription:', formData.get('_is_subscription'));
-                    console.log('_subscription_type:', formData.get('_subscription_type')); 
-                    console.log('_subscription_duration:', formData.get('_subscription_duration'));
-                    console.log('_is_subscription_exists:', formData.get('_is_subscription_exists'));
-                    console.log('_wc_recurring_billing_nonce:', formData.get('_wc_recurring_billing_nonce'));
-                } else {
-                    console.log('ERROR: Form not found!');
-                }
-                
-                $('#test-result').html('✓ Data logged to console').css('color', 'green');
-            });
+            // Initialize
+            toggleSubscriptionFields();
+            updatePreview();
             
-            // Bind events with multiple selectors
-            $(document).on('change click', '#_is_subscription', function() {
-                console.log('Checkbox event triggered');
-                toggleSubscriptionFields();
-            });
-            $(document).on('change keyup', '#_subscription_type, #_subscription_duration', updateDebugValues);
-            
-            console.log('=== Setup Complete ===');
+            // Bind events
+            $('#_is_subscription').on('change', toggleSubscriptionFields);
+            $('#_subscription_type, #_subscription_duration, #_regular_price').on('change keyup', updatePreview);
         });
         </script>
         
@@ -1694,115 +1793,68 @@ class WC_Recurring_Billing_Manager {
         .subscription_fields h4 {
             color: #0073aa !important;
         }
+        .subscription-details {
+            display: block;
+            color: #666;
+            font-weight: normal;
+            font-size: 0.9em;
+        }
         </style>
         <?php
     }
     
     public function save_subscription_product_meta($post_id) {
-        // Add extensive logging to see if this function is even called
-        error_log("============ WC Recurring Billing Save Function Called ============");
-        error_log("WC Recurring Billing: save_subscription_product_meta called for post ID: " . $post_id);
-        error_log("WC Recurring Billing: Current action/hook: " . current_action());
-        error_log("WC Recurring Billing: Available POST keys: " . implode(', ', array_keys($_POST)));
         
-        // Check if our hidden field exists
-        if (isset($_POST['_is_subscription_exists'])) {
-            error_log("WC Recurring Billing: Our hidden field found - this is our form submission");
-        } else {
-            error_log("WC Recurring Billing: Our hidden field NOT found - skipping save");
+        // Verify nonce
+        if (!isset($_POST['_wc_recurring_billing_nonce']) || 
+            !wp_verify_nonce($_POST['_wc_recurring_billing_nonce'], 'wc_recurring_billing_save')) {
             return;
         }
         
-        // Multiple security checks
+        // Check if our form was submitted
+        if (!isset($_POST['_is_subscription_exists'])) {
+            return;
+        }
+        
+        // Security checks
         if (!$post_id || !current_user_can('edit_post', $post_id)) {
-            error_log("WC Recurring Billing: Permission check failed");
             return;
         }
         
-        // Verify this is a product
         if (get_post_type($post_id) !== 'product') {
-            error_log("WC Recurring Billing: Not a product, post type is: " . get_post_type($post_id));
             return;
         }
         
-        // Skip if this is an autosave
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
-            error_log("WC Recurring Billing: Skipping autosave");
             return;
         }
         
-        error_log("WC Recurring Billing: All checks passed, proceeding with save...");
+        // Save subscription settings
+        $is_subscription = isset($_POST['_is_subscription']) && $_POST['_is_subscription'] === 'yes' ? 'yes' : 'no';
+        update_post_meta($post_id, '_is_subscription', $is_subscription);
         
-        // Log exactly what we're receiving
-        error_log("WC Recurring Billing: _is_subscription in POST: " . (isset($_POST['_is_subscription']) ? 'YES (value: ' . $_POST['_is_subscription'] . ')' : 'NO - checkbox unchecked'));
-        error_log("WC Recurring Billing: _subscription_type in POST: " . (isset($_POST['_subscription_type']) ? $_POST['_subscription_type'] : 'NOT SET'));
-        error_log("WC Recurring Billing: _subscription_duration in POST: " . (isset($_POST['_subscription_duration']) ? $_POST['_subscription_duration'] : 'NOT SET'));
-        
-        // Handle checkbox properly - if checkbox is unchecked, $_POST['_is_subscription'] won't exist
-        if (isset($_POST['_is_subscription']) && $_POST['_is_subscription'] === 'yes') {
-            $is_subscription = 'yes';
-            error_log("WC Recurring Billing: Checkbox IS checked, setting to 'yes'");
-        } else {
-            $is_subscription = 'no';
-            error_log("WC Recurring Billing: Checkbox NOT checked, setting to 'no'");
-        }
-        
-        // Get current values before save for comparison
-        $old_is_subscription = get_post_meta($post_id, '_is_subscription', true);
-        $old_subscription_type = get_post_meta($post_id, '_subscription_type', true);
-        $old_subscription_duration = get_post_meta($post_id, '_subscription_duration', true);
-        
-        error_log("WC Recurring Billing: OLD values - is_subscription: '$old_is_subscription', type: '$old_subscription_type', duration: '$old_subscription_duration'");
-        
-        // Save the subscription enable flag
-        $result1 = update_post_meta($post_id, '_is_subscription', $is_subscription);
-        error_log("WC Recurring Billing: update_post_meta for _is_subscription returned: " . ($result1 !== false ? 'SUCCESS' : 'FAILED'));
-        
-        // Save subscription type
         if (isset($_POST['_subscription_type'])) {
             $subscription_type = sanitize_text_field($_POST['_subscription_type']);
             if (in_array($subscription_type, ['monthly', 'yearly'])) {
-                $result2 = update_post_meta($post_id, '_subscription_type', $subscription_type);
-                error_log("WC Recurring Billing: update_post_meta for _subscription_type returned: " . ($result2 !== false ? 'SUCCESS' : 'FAILED'));
+                update_post_meta($post_id, '_subscription_type', $subscription_type);
             }
         } else {
             update_post_meta($post_id, '_subscription_type', 'monthly');
-            error_log("WC Recurring Billing: Set default _subscription_type to monthly");
         }
         
-        // Save subscription duration
         if (isset($_POST['_subscription_duration'])) {
             $duration = sanitize_text_field($_POST['_subscription_duration']);
             $duration_int = ($duration === '') ? '' : intval($duration);
-            $result3 = update_post_meta($post_id, '_subscription_duration', $duration_int);
-            error_log("WC Recurring Billing: update_post_meta for _subscription_duration returned: " . ($result3 !== false ? 'SUCCESS' : 'FAILED'));
+            update_post_meta($post_id, '_subscription_duration', $duration_int);
         } else {
             update_post_meta($post_id, '_subscription_duration', '');
-            error_log("WC Recurring Billing: Set _subscription_duration to empty");
         }
         
-        // Force cache clear
+        // Clear cache
         wp_cache_delete($post_id, 'post_meta');
         clean_post_cache($post_id);
         
-        // Immediate verification after save
-        $new_is_subscription = get_post_meta($post_id, '_is_subscription', true);
-        $new_subscription_type = get_post_meta($post_id, '_subscription_type', true);
-        $new_subscription_duration = get_post_meta($post_id, '_subscription_duration', true);
-        
-        error_log("WC Recurring Billing: NEW values after save - is_subscription: '$new_is_subscription', type: '$new_subscription_type', duration: '$new_subscription_duration'");
-        error_log("============ WC Recurring Billing Save Function Completed ============");
-        
-        // Add a success flag to session for debugging
-        $_SESSION['wc_recurring_billing_last_save'] = array(
-            'post_id' => $post_id,
-            'timestamp' => time(),
-            'values' => array(
-                'is_subscription' => $new_is_subscription,
-                'subscription_type' => $new_subscription_type,
-                'subscription_duration' => $new_subscription_duration
-            )
-        );
+        error_log("WC Recurring Billing: Product #" . $post_id . " saved successfully");
     }
     
     // Test function for manual subscription creation
@@ -1956,6 +2008,510 @@ class WC_Recurring_Billing_Manager {
         if (!$found_subscription) {
             error_log("WC Recurring Billing: No subscription products found in order #" . $order_id);
         }
+    }
+    
+    // Payment Processing Functions
+    public function init_payment_processing() {
+        // Hook into WooCommerce payment complete
+        add_action('woocommerce_payment_complete', array($this, 'process_subscription_payment'), 10, 1);
+        add_action('woocommerce_order_status_completed', array($this, 'process_subscription_payment'), 10, 1);
+        
+        // Add payment methods to invoices
+        add_action('woocommerce_thankyou', array($this, 'add_subscription_info_to_thankyou'), 20, 1);
+    }
+    
+    /**
+     * Process payment for subscription invoices
+     */
+    public function process_subscription_payment($order_id) {
+        global $wpdb;
+        
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            return;
+        }
+        
+        $invoices_table = $wpdb->prefix . 'recurring_invoices';
+        
+        // Check if this order was created for an invoice
+        $invoice_id = $order->get_meta('_recurring_invoice_id');
+        
+        if ($invoice_id) {
+            // Mark invoice as paid
+            $wpdb->update(
+                $invoices_table,
+                array(
+                    'status' => 'paid',
+                    'paid_at' => current_time('mysql')
+                ),
+                array('id' => $invoice_id),
+                array('%s', '%s'),
+                array('%d')
+            );
+            
+            error_log("WC Recurring Billing: Invoice #" . $invoice_id . " marked as paid");
+        }
+    }
+    
+    /**
+     * Add subscription information to thank you page
+     */
+    public function add_subscription_info_to_thankyou($order_id) {
+        global $wpdb;
+        
+        $order = wc_get_order($order_id);
+        if (!$order) {
+            return;
+        }
+        
+        // Check if order contains subscription products
+        $has_subscription = false;
+        foreach ($order->get_items() as $item) {
+            $product = $item->get_product();
+            if ($product && get_post_meta($product->get_id(), '_is_subscription', true) === 'yes') {
+                $has_subscription = true;
+                break;
+            }
+        }
+        
+        if ($has_subscription) {
+            ?>
+            <div class="subscription-info" style="background: #e7f3ff; padding: 20px; margin: 20px 0; border-left: 4px solid #0073aa; border-radius: 4px;">
+                <h3 style="color: #0073aa; margin-top: 0;">🎉 Subscription Activated!</h3>
+                <p><strong>Great news!</strong> Your subscription has been activated and you now have access to:</p>
+                <ul>
+                    <li>✅ URL Manager in your account dashboard</li>
+                    <li>✅ Template whitelist management</li>
+                    <li>✅ Automatic billing management</li>
+                </ul>
+                <p><a href="<?php echo wc_get_account_endpoint_url('url-manager'); ?>" class="button">Manage Your URLs</a></p>
+            </div>
+            <?php
+        }
+    }
+    
+    /**
+     * Create invoice with payment link
+     */
+    public function create_invoice_with_payment($subscription_id, $send_email = true) {
+        global $wpdb;
+        
+        // Get subscription details
+        $subscription = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $this->table_name WHERE id = %d",
+            $subscription_id
+        ));
+        
+        if (!$subscription) {
+            return false;
+        }
+        
+        // Generate invoice number
+        $invoice_number = 'INV-' . date('Y') . '-' . str_pad($subscription_id, 6, '0', STR_PAD_LEFT) . '-' . time();
+        
+        // Insert invoice
+        $invoices_table = $wpdb->prefix . 'recurring_invoices';
+        $result = $wpdb->insert(
+            $invoices_table,
+            array(
+                'subscription_id' => $subscription_id,
+                'user_id' => $subscription->user_id,
+                'invoice_number' => $invoice_number,
+                'amount' => $subscription->amount,
+                'status' => 'pending'
+            ),
+            array('%d', '%d', '%s', '%f', '%s')
+        );
+        
+        if ($result) {
+            $invoice_id = $wpdb->insert_id;
+            
+            if ($send_email) {
+                $this->send_invoice_email($invoice_id);
+            }
+            
+            return $invoice_id;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Send invoice email with payment link
+     */
+    public function send_invoice_email($invoice_id) {
+        global $wpdb;
+        
+        $invoices_table = $wpdb->prefix . 'recurring_invoices';
+        $invoice = $wpdb->get_row($wpdb->prepare(
+            "SELECT i.*, s.subscription_type, u.display_name, u.user_email 
+             FROM $invoices_table i 
+             LEFT JOIN $this->table_name s ON i.subscription_id = s.id 
+             LEFT JOIN {$wpdb->users} u ON i.user_id = u.ID 
+             WHERE i.id = %d",
+            $invoice_id
+        ));
+        
+        if (!$invoice) {
+            return false;
+        }
+        
+        // Create payment product temporarily (you could also create a dedicated payment page)
+        $payment_url = add_query_arg(array(
+            'pay_invoice' => $invoice_id,
+            'invoice_key' => wp_hash($invoice->invoice_number)
+        ), home_url());
+        
+        $subject = 'Invoice ' . $invoice->invoice_number . ' - Payment Due';
+        
+        $message = "Hello {$invoice->display_name},\n\n";
+        $message .= "Your subscription invoice is ready:\n\n";
+        $message .= "Invoice Number: {$invoice->invoice_number}\n";
+        $message .= "Amount: $" . number_format($invoice->amount, 2) . "\n";
+        $message .= "Subscription: " . ucfirst($invoice->subscription_type) . "\n";
+        $message .= "Due Date: " . date('F j, Y', strtotime($invoice->created_at . ' +7 days')) . "\n\n";
+        $message .= "Click here to pay online:\n";
+        $message .= $payment_url . "\n\n";
+        $message .= "Or log into your account to manage your subscription:\n";
+        $message .= wc_get_account_endpoint_url('url-manager') . "\n\n";
+        $message .= "Thank you for your business!";
+        
+        return wp_mail($invoice->user_email, $subject, $message);
+    }
+    
+    // Payment Handler Functions
+    public function init_payment_handlers() {
+        // Handle invoice payment URLs
+        add_action('init', array($this, 'handle_invoice_payment_requests'));
+        
+        // Add invoice payment processing
+        add_action('wp', array($this, 'process_invoice_payment_page'));
+        
+        // Hook into WooCommerce checkout
+        add_action('woocommerce_checkout_process', array($this, 'validate_invoice_payment'));
+        add_action('woocommerce_checkout_order_processed', array($this, 'link_order_to_invoice'));
+    }
+    
+    /**
+     * Handle invoice payment URLs
+     */
+    public function handle_invoice_payment_requests() {
+        if (isset($_GET['pay_invoice']) && isset($_GET['invoice_key'])) {
+            $this->display_invoice_payment_page();
+            exit;
+        }
+    }
+    
+    /**
+     * Display invoice payment page
+     */
+    public function display_invoice_payment_page() {
+        $invoice_id = intval($_GET['pay_invoice']);
+        $invoice_key = sanitize_text_field($_GET['invoice_key']);
+        
+        global $wpdb;
+        $invoices_table = $wpdb->prefix . 'recurring_invoices';
+        
+        // Get invoice details
+        $invoice = $wpdb->get_row($wpdb->prepare(
+            "SELECT i.*, s.subscription_type, u.display_name, u.user_email 
+             FROM $invoices_table i 
+             LEFT JOIN $this->table_name s ON i.subscription_id = s.id 
+             LEFT JOIN {$wpdb->users} u ON i.user_id = u.ID 
+             WHERE i.id = %d",
+            $invoice_id
+        ));
+        
+        if (!$invoice || wp_hash($invoice->invoice_number) !== $invoice_key) {
+            wp_die('Invalid invoice link.');
+        }
+        
+        if ($invoice->status === 'paid') {
+            wp_die('This invoice has already been paid.');
+        }
+        
+        get_header();
+        ?>
+        <div class="invoice-payment-page" style="max-width: 800px; margin: 40px auto; padding: 20px;">
+            <div class="invoice-header" style="background: #f8f9fa; padding: 30px; border-radius: 8px; margin-bottom: 30px; text-align: center;">
+                <h1 style="color: #0073aa; margin: 0 0 10px 0;">Invoice Payment</h1>
+                <p style="color: #666; margin: 0;">Invoice #<?php echo esc_html($invoice->invoice_number); ?></p>
+            </div>
+            
+            <div class="invoice-details" style="background: white; padding: 30px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 30px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3 style="margin: 0 0 15px 0; color: #333;">Invoice Details</h3>
+                        <p><strong>Customer:</strong> <?php echo esc_html($invoice->display_name); ?></p>
+                        <p><strong>Email:</strong> <?php echo esc_html($invoice->user_email); ?></p>
+                        <p><strong>Subscription:</strong> <?php echo ucfirst($invoice->subscription_type); ?></p>
+                        <p><strong>Invoice Date:</strong> <?php echo date('F j, Y', strtotime($invoice->created_at)); ?></p>
+                    </div>
+                    <div style="text-align: right;">
+                        <h3 style="margin: 0 0 15px 0; color: #333;">Amount Due</h3>
+                        <div style="font-size: 36px; font-weight: bold; color: #0073aa; margin: 20px 0;">
+                            $<?php echo number_format($invoice->amount, 2); ?>
+                        </div>
+                        <p style="color: #666;">Due: <?php echo date('F j, Y', strtotime($invoice->created_at . ' +7 days')); ?></p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="payment-options" style="background: white; padding: 30px; border: 1px solid #ddd; border-radius: 8px;">
+                <h3 style="margin: 0 0 20px 0; color: #333;">Payment Options</h3>
+                
+                <!-- Option 1: Create WooCommerce Order -->
+                <div class="payment-method" style="border: 1px solid #ddd; border-radius: 6px; padding: 20px; margin-bottom: 15px;">
+                    <h4 style="margin: 0 0 10px 0;">💳 Pay with Credit Card</h4>
+                    <p style="color: #666; margin: 0 0 15px 0;">Secure payment processing through our checkout system</p>
+                    <form method="post" action="<?php echo esc_url(home_url()); ?>">
+                        <input type="hidden" name="invoice_payment" value="<?php echo $invoice_id; ?>">
+                        <input type="hidden" name="invoice_key" value="<?php echo esc_attr($invoice_key); ?>">
+                        <?php wp_nonce_field('pay_invoice_' . $invoice_id, 'invoice_nonce'); ?>
+                        <button type="submit" class="button" style="background: #0073aa; color: white; padding: 12px 24px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer;">
+                            Pay $<?php echo number_format($invoice->amount, 2); ?> Now
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Option 2: Manual Payment Instructions -->
+                <div class="payment-method" style="border: 1px solid #ddd; border-radius: 6px; padding: 20px;">
+                    <h4 style="margin: 0 0 10px 0;">🏦 Bank Transfer</h4>
+                    <p style="color: #666; margin: 0 0 15px 0;">Send payment directly to our bank account</p>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 4px; font-family: monospace;">
+                        <p><strong>Account Name:</strong> Your Business Name</p>
+                        <p><strong>Account Number:</strong> 1234567890</p>
+                        <p><strong>Routing Number:</strong> 123456789</p>
+                        <p><strong>Reference:</strong> <?php echo esc_html($invoice->invoice_number); ?></p>
+                    </div>
+                    <p style="margin-top: 15px; color: #666; font-size: 14px;">
+                        <em>Please include the invoice number as reference. Payment processing may take 2-3 business days.</em>
+                    </p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <p style="color: #666;">Questions? <a href="mailto:support@yoursite.com">Contact Support</a></p>
+            </div>
+        </div>
+        
+        <style>
+        @media (max-width: 768px) {
+            .invoice-payment-page {
+                margin: 20px auto;
+                padding: 10px;
+            }
+            .invoice-details > div {
+                grid-template-columns: 1fr !important;
+            }
+        }
+        </style>
+        <?php
+        get_footer();
+    }
+    
+    /**
+     * Process invoice payment through WooCommerce checkout
+     */
+    public function process_invoice_payment_page() {
+        if (!isset($_POST['invoice_payment']) || !isset($_POST['invoice_key'])) {
+            return;
+        }
+        
+        $invoice_id = intval($_POST['invoice_payment']);
+        $invoice_key = sanitize_text_field($_POST['invoice_key']);
+        
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['invoice_nonce'], 'pay_invoice_' . $invoice_id)) {
+            wc_add_notice('Security check failed.', 'error');
+            return;
+        }
+        
+        // Get invoice
+        global $wpdb;
+        $invoices_table = $wpdb->prefix . 'recurring_invoices';
+        $invoice = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $invoices_table WHERE id = %d",
+            $invoice_id
+        ));
+        
+        if (!$invoice || wp_hash($invoice->invoice_number) !== $invoice_key) {
+            wc_add_notice('Invalid invoice.', 'error');
+            return;
+        }
+        
+        if ($invoice->status === 'paid') {
+            wc_add_notice('This invoice has already been paid.', 'error');
+            return;
+        }
+        
+        // Create a temporary product for the invoice
+        $this->create_invoice_payment_order($invoice);
+    }
+    
+    /**
+     * Create WooCommerce order for invoice payment
+     */
+    public function create_invoice_payment_order($invoice) {
+        // Clear cart first
+        WC()->cart->empty_cart();
+        
+        // Create a virtual product for the invoice
+        $product = new WC_Product_Simple();
+        $product->set_name('Invoice Payment - ' . $invoice->invoice_number);
+        $product->set_regular_price($invoice->amount);
+        $product->set_virtual(true);
+        $product->set_catalog_visibility('hidden');
+        $product->save();
+        
+        // Add to cart
+        WC()->cart->add_to_cart($product->get_id(), 1);
+        
+        // Store invoice ID in session
+        WC()->session->set('paying_invoice_id', $invoice->id);
+        
+        // Redirect to checkout
+        wp_redirect(wc_get_checkout_url());
+        exit;
+    }
+    
+    /**
+     * Link completed order to invoice
+     */
+    public function link_order_to_invoice($order_id) {
+        $invoice_id = WC()->session->get('paying_invoice_id');
+        
+        if ($invoice_id) {
+            global $wpdb;
+            $invoices_table = $wpdb->prefix . 'recurring_invoices';
+            
+            // Update invoice status
+            $wpdb->update(
+                $invoices_table,
+                array(
+                    'status' => 'paid',
+                    'paid_at' => current_time('mysql')
+                ),
+                array('id' => $invoice_id),
+                array('%s', '%s'),
+                array('%d')
+            );
+            
+            // Add order meta
+            $order = wc_get_order($order_id);
+            $order->update_meta_data('_recurring_invoice_id', $invoice_id);
+            $order->save();
+            
+            // Clear session
+            WC()->session->__unset('paying_invoice_id');
+            
+            // Send confirmation email
+            $this->send_payment_confirmation_email($invoice_id, $order_id);
+        }
+    }
+    
+    /**
+     * Send payment confirmation email
+     */
+    public function send_payment_confirmation_email($invoice_id, $order_id) {
+        global $wpdb;
+        $invoices_table = $wpdb->prefix . 'recurring_invoices';
+        
+        $invoice = $wpdb->get_row($wpdb->prepare(
+            "SELECT i.*, u.display_name, u.user_email 
+             FROM $invoices_table i 
+             LEFT JOIN {$wpdb->users} u ON i.user_id = u.ID 
+             WHERE i.id = %d",
+            $invoice_id
+        ));
+        
+        if (!$invoice) {
+            return;
+        }
+        
+        $subject = 'Payment Confirmation - Invoice ' . $invoice->invoice_number;
+        
+        $message = "Hello {$invoice->display_name},\n\n";
+        $message .= "Thank you! Your payment has been received.\n\n";
+        $message .= "Payment Details:\n";
+        $message .= "Invoice: {$invoice->invoice_number}\n";
+        $message .= "Amount: $" . number_format($invoice->amount, 2) . "\n";
+        $message .= "Order: #{$order_id}\n";
+        $message .= "Paid: " . date('F j, Y \a\t g:i A') . "\n\n";
+        $message .= "Your subscription continues to be active.\n";
+        $message .= "Manage your account: " . wc_get_account_endpoint_url('url-manager') . "\n\n";
+        $message .= "Thank you for your business!";
+        
+        wp_mail($invoice->user_email, $subject, $message);
+    }
+    
+    /**
+     * Add custom rewrite rules for payment handlers
+     */
+    public function add_payment_rewrite_rules() {
+        add_rewrite_rule('^invoice-payment/([0-9]+)/?', 'index.php?pay_invoice=$matches[1]', 'top');
+    }
+    
+    /**
+     * Handle payment rewrite queries
+     */
+    public function handle_payment_queries($vars) {
+        $vars[] = 'pay_invoice';
+        return $vars;
+    }
+    
+    /**
+     * Get subscription status with expiry check
+     */
+    public function get_subscription_status($subscription_id) {
+        global $wpdb;
+        
+        $subscription = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $this->table_name WHERE id = %d",
+            $subscription_id
+        ));
+        
+        if (!$subscription) {
+            return 'not_found';
+        }
+        
+        // Check if expired
+        if ($subscription->expiry_date && strtotime($subscription->expiry_date) < time()) {
+            return 'expired';
+        }
+        
+        return $subscription->status;
+    }
+    
+    /**
+     * Check if user has active subscription
+     */
+    public function user_has_active_subscription($user_id) {
+        global $wpdb;
+        
+        $count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $this->table_name 
+             WHERE user_id = %d AND status = 'active' 
+             AND (expiry_date IS NULL OR expiry_date > NOW())",
+            $user_id
+        ));
+        
+        return $count > 0;
+    }
+    
+    /**
+     * Get user's subscription info
+     */
+    public function get_user_subscription_info($user_id) {
+        global $wpdb;
+        
+        return $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $this->table_name 
+             WHERE user_id = %d AND status = 'active' 
+             AND (expiry_date IS NULL OR expiry_date > NOW())
+             ORDER BY created_at DESC LIMIT 1",
+            $user_id
+        ));
     }
 }
 
