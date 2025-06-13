@@ -10,16 +10,25 @@ class WC_RBM_Database {
     const DB_VERSION = '2.0';
     
     /**
+     * Table names cache
+     */
+    private $table_names = null;
+    
+    /**
      * Get table names
      */
     public function get_table_names() {
-        global $wpdb;
+        if ($this->table_names === null) {
+            global $wpdb;
+            
+            $this->table_names = array(
+                'subscriptions' => $wpdb->prefix . 'recurring_subscriptions',
+                'invoices' => $wpdb->prefix . 'recurring_invoices',
+                'user_urls' => $wpdb->prefix . 'user_whitelist_urls'
+            );
+        }
         
-        return array(
-            'subscriptions' => $wpdb->prefix . 'recurring_subscriptions',
-            'invoices' => $wpdb->prefix . 'recurring_invoices',
-            'user_urls' => $wpdb->prefix . 'user_whitelist_urls'
-        );
+        return $this->table_names;
     }
     
     /**
